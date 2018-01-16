@@ -1,0 +1,65 @@
+PoseNet: A Convolutional Network for Real-Time 6-DOF Camera Relocalization
+ 
+剑桥大学
+介绍
+PoseNet是一套基于CNN的单目摄像头重定位框架。
+系统训练的CNN网络接受RGB图片为输入，输出6-DOF的相机位置，在室外场景下能够达到2m和6度的准确度。
+主要贡献：
+（1）PoseNet使用迁移学习在大规模图像数据集上将认知能力迁移到重定位能力。
+（2）使用structure from motion(SFM)从一段视频中自动生成训练样本。
+（3）使用GoogLeNet网络结构，并做了一下的修改：将三个softmax层分类器替换为回归量；增加一个新的全连接层在回归层之前；测试时将回归输出的7个变量中的四元数归一化。
+优点：a) 不需要深度信息
+      b) 对黄昏、雨雾、夜晚、运动模糊、不同内参的相机具有一定的鲁棒性。
+      c) 对于sift特征提取无效的场景也可以适用。
+      d) 随着训练样本间隔的增大，模型预测的效果呈现优美地下降，而不像sift特征方法有一个阈值的存在。
+
+1.	环境搭建
+Ubuntu14.04，cuda-7.5
+http://mi.eng.cam.ac.uk/projects/relocalisation/#dataset网站上下载代码、数据集和训练好的模型，代码目录caffe-posenet，模型目录PoseNet，数据集包括室外场景King’s College 、Street 、Old Hospital 、Shop Facade 、St Mary’s Church、Trinity Great Court，后续以King’s College为例。
+需要额外安装一些必要的python库。
+代码编译：进入caffe-posenet目录下
+$mkdir build
+$cd build
+$cmake ..
+$make –j4
+代码编译好后即可进行后续的实验。
+2.	论文Demo复现
+这里以King’s College数据集为例。
+（1）	修改caffe-posenet/posenet/scripts/create_posenet_lmdb_dataset.py
+修改caffe_root变量为当前caffe-posenet所在目录绝对路径
+修改directory变量为King’s College数据集目录，dataset变量为King’s College数据集目录中测试数据集的文件名。
+（2）	执行./caffe-posenet/ posenet/scripts/create_posenet_lmdb_dataset.py，会在当前目录下生成一个posenet_dataset_lmdb目录。
+（3）	运行./caffe-posenet/build/tools/compute_image_mean posenet_dataset_lmdb目录路径 imagemean.binaryproto，将会生成一个图像均值文件imagemean.binaryproto。
+（4）	修改模型文件PoseNet/train_kingscollege.prototxt， 将其中的source和mean_file对应的路径修改为刚才lmdb的路径和图像均值文件的路径。（这里注意train和test使用的两个路径都需要设置，并且不能设置为同一个路径，否则会产生死锁。因为我们并不需要对模型进行训练，所以为了方便可以copy一份上面的posenet_dataset_lmdb和图像均值文件）
+（5）	运行python caffe-posenet/posenet/scripts/test_posenet.py --model PoseNet/train_kingscollege.prototxt --weights PoseNet/weight_kingscollege.caffemodel --iter 500
+可以看到模型将对test数据集中的所有图片进行预测，并与ground truth进行比较，得到两者的error。
+ 
+3.	华为大厦的posenet模型
+本节将一步步完成对华为大厦构建PoseNet模型的过程。
+（1）	录视频
+绕华为大厦外围换换走半圈，将大厦全貌覆盖，并且注意减少剧烈的晃动。
+（2）	训练样本和测试样本生成
+使用SFM来构建训练样本和测试样本。这里需要安装VisualSFM工具（http://ccwu.me/vsfm/index.html），同时安装它构建dense map时需要用到的PMVS/CMVS工具，SiftGPU，Multicore BA，每个工具需要在对应官网下载源码进行编译，并将需要的二进制文件拷贝到vsfm的bin目录下。
+a)	将视频按照一定频率抽取得到图片，并将图片保存为jpg格式，共得到1352张图片。
+b)	将图片输送到vsfm中，得到对应的sparse重建和dense重建，该过程需要较长的时间。
+ 
+下面两张图分别对应sparse重建图和dense重建图。
+ 
+ 
+Dense重建构建的不是特别好，初步估计是由于华为大厦建筑的图像特征不明显，视角较近。同样使用King’s College中的seq1视频的图像进行了Sparse重建和Dense重建如下图所示。
+ 
+ 
+
+c)	地图将会在本地保存为.nvm文件，文件的格式如下：
+ 
+从中可以提取得到每个图片对应的位置和四元数，这7个变量将作为图片的ground truth数据。
+d)	选取其中1000张图片作为训练集，352张图片作为测试集。
+ 
+train.txt和test.txt文件都为上述格式，第一列为图片路径，之后四列对应于四元数WXYZ，最后三列对应3D位置XYZ。
+（3）	模型训练
+a)	修改caffe-posenet/posenet/models/solver_posenet.prototxt文件指定训练的迭代次数，网络结构使用的文件，生成模型保存的路径，以及其他训练中需要用到的配置。
+b)	修改caffe-posenet/posenet/models/ train_posenet.prototxt，修改train和test使用的lmdb路径和图像均值文件的路径。
+c)	运行./caffe-posenet/build/tools/caffe train –solver caffe-posenet/posenet/models/solver_posenet.prototxt进行训练。
+（4）	模型验证
+使用上节相同的方法对test数据集进行验证，可以得到最终的结果。
+python ./caffe-posenet/posenet/scripts/test_posenet.py --model ./caffe-posenet/posenet/models/train_posenet.prototxt --weight ./models/model_iter_30000.caffemodel --iter 352
