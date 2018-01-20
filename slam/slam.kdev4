@@ -1,0 +1,4 @@
+[Project]
+Name=slam
+Manager=KDevCMakeManager
+VersionControl=
